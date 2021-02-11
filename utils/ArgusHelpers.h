@@ -41,10 +41,10 @@ namespace ArgusHelpers
 /**
  * Returns the CameraDevice of a given index from a CameraProvider.
  *
- * @param[in] cameraProvider The CameraProvider to get the device from.
+ * @param[in] camera_provider The CameraProvider to get the device from.
  * @param[in] cameraDeviceIndex The index of the device to get.
  */
-Argus::CameraDevice* getCameraDevice(Argus::CameraProvider* cameraProvider,
+Argus::CameraDevice* getCameraDevice(Argus::CameraProvider* camera_provider,
                                      uint32_t cameraDeviceIndex);
 
 /**

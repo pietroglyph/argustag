@@ -34,11 +34,11 @@
 namespace ArgusSamples
 {
 
-Argus::CameraDevice* ArgusHelpers::getCameraDevice(Argus::CameraProvider* cameraProvider,
+Argus::CameraDevice* ArgusHelpers::getCameraDevice(Argus::CameraProvider* camera_provider,
                                                    uint32_t cameraDeviceIndex)
 {
     Argus::ICameraProvider *iCameraProvider =
-        Argus::interface_cast<Argus::ICameraProvider>(cameraProvider);
+        Argus::interface_cast<Argus::ICameraProvider>(camera_provider);
     if (iCameraProvider == NULL)
     {
         printf("Failed to get ICameraProvider interface.\n");

@@ -7,4 +7,7 @@
 
 *.swp
 
+compile_commands.json
+.clangd/
+.idea/
 build/

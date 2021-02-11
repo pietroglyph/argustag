@@ -24,37 +24,62 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-cmake_minimum_required (VERSION 3.1)
+cmake_minimum_required (VERSION 3.8)
 
-project(argus_cudahistogram)
+project(cucoslam LANGUAGES CXX CUDA)
 
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake" "${CMAKE_MODULE_PATH}")
 
-set(CMAKE_CXX_STANDARD 17)
+if (NOT DEFINED CMAKE_CXX_STANDARD)
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED True)
+endif()
+if (NOT DEFINED CMAKE_CUDA_STANDARD)
+    set(CMAKE_CUDA_STANDARD 11)
+    set(CMAKE_CUDA_STANDARD_REQUIRED True)
+endif()
 
-find_package(CUDA REQUIRED)
+set(THIRDPARTY_DEP_DIR "${CMAKE_SOURCE_DIR}/thirdparty/lib/cmake")
+
 find_package(Argus REQUIRED)
+find_package(fmt REQUIRED
+    PATHS ${THIRDPARTY_DEP_DIR})
+find_package(cuda-api-wrappers
+    PATHS ${THIRDPARTY_DEP_DIR})
 
-set(SOURCES
+add_executable(${PROJECT_NAME}
     main.cpp
-    histogram.cu
+    argus_camera.cpp
 
     utils/ArgusHelpers.cpp
-    utils/CUDAHelper.cpp
+    histogram.cu
     )
 
-include_directories(
-    ${ARGUS_INCLUDE_DIR}
-    #${CMAKE_SOURCE_DIR}/argus/utils
+#target_compile_options(${PROJECT_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-gencode arch=compute_35,code=sm_35>)
+
+target_include_directories(${PROJECT_NAME} PRIVATE
+    ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
+    ${ARGUS_INCLUDE_DIRS}
     )
 
-cuda_add_executable(${PROJECT_NAME} ${SOURCES})
-
-target_link_libraries(${PROJECT_NAME}
+target_link_libraries(${PROJECT_NAME} PRIVATE
     ${ARGUS_LIBRARIES}
-    #argussampleutils
+    fmt::fmt
     cuda
+    pthread
+    nppisu
+    nppicc
+    EGL
     )
+
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    CUDA_SEPARABLE_COMPILATION ON)
+
+# TODO: Figure out how to isolate Argus' includes to another target so that we can turn this on
+#target_compile_options(${PROJECT_NAME} PRIVATE
+#    $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX>
+#    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -pedantic -Werror>
+#)
 
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)
 
