@@ -52,7 +52,8 @@ add_executable(${PROJECT_NAME}
     argus_camera.cpp
 
     utils/ArgusHelpers.cpp
-    histogram.cu
+    # Linking breaks without at least one .cu file... I anticipate having real files so I'll go with this kludge for now
+    dummy.cu 
     )
 
 #target_compile_options(${PROJECT_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-gencode arch=compute_35,code=sm_35>)
@@ -67,9 +68,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     fmt::fmt
     cuda
     pthread
-    nppisu
     nppicc
-    EGL
     )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES

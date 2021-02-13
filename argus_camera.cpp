@@ -25,8 +25,8 @@
 #include <stdexcept>
 
 // This beautifies our interactions with Argus so that we don't have to use
-// their funky unique_ptr lookalike... Should only really be used for borrows
-// because unique_ptr is still managing the memory lifetime.
+// their auto_ptr lookalike... 🤢 Note that this is not an owning pointer;
+// i.e. the unique_ptr still owns the memory this points to.
 namespace Argus {
 template <typename Interface, typename Object>
 inline Interface *interface_cast(
@@ -34,23 +34,6 @@ inline Interface *interface_cast(
   return interface_cast<Interface>(obj.get());
 }
 } // namespace Argus
-
-namespace cuda {
-template <typename T, dimensionality_t NumDimensions>
-class array_nonowning_t : public array_t<T, NumDimensions> {
-public:
-  // There are more constructors, but we only need to define this one for the
-  // one place we use a nonowning array
-  array_nonowning_t(cudaArray *raw_cuda_array,
-                    array::dimensions_t<NumDimensions> dimensions)
-      : array_t<T, NumDimensions>(raw_cuda_array, dimensions){};
-
-  array_nonowning_t(const array_nonowning_t &other) = delete;
-  array_nonowning_t(array_nonowning_t &&other) = delete;
-
-  ~array_nonowning_t() noexcept {};
-};
-} // namespace cuda
 
 namespace cuco {
 
@@ -102,7 +85,7 @@ argus_camera::argus_camera(uint32_t camera_index, uint32_t sensor_mode_index)
   i_stream_settings->setPixelFormat(ag::PIXEL_FMT_YCbCr_420_888);
   i_stream_settings->setResolution(i_sensor_mode->getResolution());
   i_stream_settings->setMode(
-      ag::EGL_STREAM_MODE_MAILBOX); // Only get the latest frame; TODO: FIFO
+      ag::EGL_STREAM_MODE_MAILBOX); // Only keep the latest frame; TODO: FIFO
                                     // might be better?
 
   // Create an OutputStream for our given settings
@@ -114,7 +97,7 @@ argus_camera::argus_camera(uint32_t camera_index, uint32_t sensor_mode_index)
     throw std::runtime_error("Failed to create EGL OutputStream");
   egl_stream = i_output_stream->getEGLStream();
 
-  // Create a capture request and enable the camera's output stream
+  // Create a capture request
   capture_request.reset(i_capture_session->createRequest());
   ag::IRequest *i_request = ag::interface_cast<ag::IRequest>(capture_request);
   if (!i_request)
@@ -127,24 +110,6 @@ argus_camera::argus_camera(uint32_t camera_index, uint32_t sensor_mode_index)
   if (!i_source_settings)
     throw std::runtime_error("Failed to get source settings request interface");
   i_source_settings->setSensorMode(sensor_mode);
-
-  start_capture();
-
-  // const NppLibraryVersion *libVer = nppGetLibVersion();
-  // fmt::print("NPP version {}.{}.{}\n", libVer->major, libVer->minor,
-  // libVer->build);
-
-  while (true) {
-    ag::Status status;
-    uint32_t res = i_capture_session->capture(capture_request.get(),
-                                              ag::TIMEOUT_INFINITE, &status);
-    if (res == 0)
-      throw std::runtime_error(fmt::format(
-          "Couldn't submit Argus capture request: status {}", status));
-    fmt::print("Frame submitted (res {})\n", res);
-
-    frame_producer_ready = true;
-  }
 }
 
 void argus_camera::start_capture() {
@@ -169,23 +134,6 @@ void argus_camera::start_capture() {
     // We bind the CUDA device that was active for the spawning thread (usually
     // the main thread) to this new thread
     device.make_current();
-
-    // auto eglQueryStreamKHR =
-    // reinterpret_cast<PFNEGLQUERYSTREAMKHRPROC>(eglGetProcAddress("eglQueryStreamKHR"));
-    // if (!eglQueryStreamKHR)
-    //     throw std::runtime_error("Couldn't get function pointer for
-    //     eglQueryStreamKHR EGL extension function");
-
-    // Wait for the Argus producer to connect to the stream
-    // EGLint eglStreamState;
-    // do {
-    //     if (!eglQueryStreamKHR(EGL_NO_DISPLAY, egl_stream,
-    //     EGL_STREAM_STATE_KHR, &eglStreamState)) {
-    //         throw std::runtime_error(fmt::format("Failed to query EGL stream
-    //         state (did the producer fail?) Stream state was {}",
-    //         eglStreamState));
-    //     }
-    // } while (eglStreamState != EGL_STREAM_STATE_NEW_FRAME_AVAILABLE_KHR);
 
     // The "correct" way to do this is to query the stream state with
     // eglQueryStreamKHR. Unfortunately, eglQueryStreamKHR doesn't work without
@@ -225,12 +173,7 @@ void argus_camera::start_capture() {
         throw std::runtime_error(
             fmt::format("Unable to get EGLFrame from a CUDA resource: {}",
                         cudaGetErrorString(res)));
-      // else if (egl_frame.frameType != CU_EGL_FRAME_TYPE_PITCH)
-      //     throw std::runtime_error("Only pitch frame types are supported");
 
-      // if (egl_frame.cuFormat != CU_AD_FORMAT_UNSIGNED_INT8)
-      //     throw std::runtime_error(fmt::format("Frame bit format of {} is
-      //     unsupported; only uint8 is supported", egl_frame.cuFormat));
       // Y'CbCr 4:2:0 Semiplanar (2-plane) Extended Range is more commonly known
       // as NV12
       if (egl_frame.eglColorFormat !=
@@ -242,13 +185,6 @@ void argus_camera::start_capture() {
       else if (egl_frame.frameType != cudaEglFrameType::cudaEglFrameTypeArray)
         throw std::runtime_error(
             "Only array-type (non-pitched) frames are supported");
-
-      // Likeley will never happen, but it's good to be defensive
-      // static constexpr auto pos_int_max = static_cast<unsigned
-      // int>(std::numeric_limits<int>::max()); if (egl_frame.planeDesc[0].width
-      // > pos_int_max || egl_frame.planeDesc[0].width)
-      //     throw std::runtime_error("Frame dimensions would overflow a
-      //     positive signed integer");
 
       if (!y_plane || !cbcr_plane) {
         y_plane = cuda::memory::device::make_unique<uint8_t[]>(
@@ -267,49 +203,16 @@ void argus_camera::start_capture() {
         // hold our new converted frame. Otherwise, we overwrite the previous
         // frame's memory.
         if (!latest_frame) {
-          // fmt::print("Latest frame was empty; allocating a new RGB frame\n");
-          // auto blah = nppiMalloc_8u_C1(egl_frame.width, egl_frame.height,
-          // &nv12_frame_pitch); fmt::print("Aligned pitch: {}\n",
-          // nv12_frame_pitch); nppiFree(blah); auto new_frame_ptr =
-          // nppiMalloc_8u_C3(egl_frame.width, egl_frame.height,
-          // &rgb_frame_pitch); if (!new_frame_ptr)
-          //     throw std::runtime_error("Couldn't allocate a new RGB frame on
-          //     the GPU");
-          // latest_frame.reset(new_frame_ptr);//cuda::memory::device::make_unique<uint8_t[]>(device,
-          // cuda::size_t{egl_frame.width * egl_frame.height * 3});
           latest_frame = cuda::memory::device::make_unique<uint8_t[]>(
               device,
               3 * egl_frame.planeDesc[0].width * egl_frame.planeDesc[0].height);
         }
 
-        // struct cudaResourceDesc y_res_desc{};
-        // y_res_desc.resType = cudaResourceType::cudaResourceTypeArray;
-        // y_res_desc.res.array.array = egl_frame.frame.pArray[0];
-
-        // cudaSurfaceObject_t y_surf{};
-        // cudaCreateSurfaceObject(&y_surf, &y_res_desc);
-        // if (res != cudaError::cudaSuccess)
-        //     throw std::runtime_error(fmt::format("Couldn't create a surface
-        //     object from the luma (Y') plane: {}", cudaGetErrorString(res)));
-
-        // struct cudaResourceDesc cbcr_res_desc{};
-        // cbcr_res_desc.resType = cudaResourceType::cudaResourceTypeArray;
-        // cbcr_res_desc.res.array.array = egl_frame.frame.pArray[1];
-
-        // cudaSurfaceObject_t cbcr_surf{};
-        // cudaCreateSurfaceObject(&cbcr_surf, &cbcr_res_desc);
-        // if (res != cudaError::cudaSuccess)
-        //     throw std::runtime_error(fmt::format("Couldn't create a surface
-        //     object from the C_b and C_r plane: {}",
-        //     cudaGetErrorString(res)));
-
-        fmt::print("Y' pitch: {}; CbCr pitch: {}\n",
-                   egl_frame.planeDesc[0].width, egl_frame.planeDesc[1].width);
-
         // Copy from the array we get back to a contiguous block of memory, row
-        // major
+        // major... Could use the C++ wrapper copy function here, but the
+        // unwrapped C-style call is actually more concise.
         // TODO: A kernel that converts as it reads from a surface bound to the
-        // array would probably be faster
+        // array would probably be faster.
         std::size_t pitch_y = egl_frame.planeDesc[0].width;
         std::size_t pitch_cbcr = egl_frame.planeDesc[1].width;
         cudaMemcpy2DFromArray(y_plane.get(), pitch_y, egl_frame.frame.pArray[0],
@@ -319,37 +222,30 @@ void argus_camera::start_capture() {
                               egl_frame.frame.pArray[1], 0, 0, pitch_cbcr,
                               egl_frame.planeDesc[1].height,
                               cudaMemcpyKind::cudaMemcpyDefault);
-        // cuda::array_nonowning_t<uint8_t, 2>
-        // y_plane_array{egl_frame.frame.pArray[0],
-        // {egl_frame.planeDesc[0].width, egl_frame.planeDesc[0].height}};
-        // cuda::array_nonowning_t<uint8_t, 2>
-        // cbcr_plane_array{egl_frame.frame.pArray[1],
-        // {egl_frame.planeDesc[1].width, egl_frame.planeDesc[1].height}};
-        // cuda::memory::copy(y_plane.get(), y_plane_array);
-        // cuda::memory::copy(cbcr_plane.get(), cbcr_plane_array);
-        fmt::print("here1\n");
+
         uint8_t **const foo = pitched_image.get();
         foo[0] = y_plane.get();
         foo[1] = cbcr_plane.get();
-        fmt::print("here2\n");
-        // pitched_image[1] = cbcr_plane.get();
 
-        // NppStatus res = nppiNV12ToRGB_8u_P2C3R(foo,
-        // egl_frame.planeDesc[0].width, latest_frame.get(),
-        // egl_frame.planeDesc[0].width * 3,
-        // NppiSize{static_cast<int>(egl_frame.planeDesc[0].width),
-        // static_cast<int>(egl_frame.planeDesc[0].height)}); if (res !=
-        // NPP_SUCCESS)
-        //     throw std::runtime_error(fmt::format("Couldn't convert Argus
-        //     frame from NV12 to packed 8-bit RGB: {}", res));
-        // fmt::print("here3\n");
+        // Likeley will never happen, but it's good to be defensive
+        static constexpr auto pos_int_max =
+            static_cast<unsigned int>(std::numeric_limits<int>::max());
+        if (egl_frame.planeDesc[0].width > pos_int_max ||
+            egl_frame.planeDesc[1].width > pos_int_max)
+          throw std::runtime_error(
+              "Frame dimensions would overflow a positive signed integer");
 
-        // res = cudaDestroySurfaceObject(y_surf);
-        // if (res != cudaError::cudaSuccess)
-        //     throw std::runtime_error("Couldn't destroy Y' surface");
-        // res = cudaDestroySurfaceObject(cbcr_surf);
-        // if (res != cudaError::cudaSuccess)
-        //     throw std::runtime_error("Couldn't destroy CbCr surface");
+        NppStatus res = nppiNV12ToRGB_8u_P2C3R(
+            foo, egl_frame.planeDesc[0].width, latest_frame.get(),
+            egl_frame.planeDesc[0].width * 3,
+            NppiSize{static_cast<int>(egl_frame.planeDesc[0].width),
+                     static_cast<int>(egl_frame.planeDesc[0].height)});
+        if (res != NPP_SUCCESS)
+          throw std::runtime_error(fmt::format(
+              "Couldn't convert Argus frame from NV12 to packed 8-bit RGB: {}",
+              res));
+
+        cuda::synchronize(device);
       }
 
       res = cudaEGLStreamConsumerReleaseFrame(
@@ -359,6 +255,24 @@ void argus_camera::start_capture() {
         throw std::runtime_error(
             fmt::format("Couldn't release frame to EGLStream for reus: {}",
                         cudaGetErrorString(res)));
+    }
+  });
+
+  capture_request_thread = std::thread([&]() {
+    ag::ICaptureSession *i_capture_session =
+        ag::interface_cast<ag::ICaptureSession>(capture_session);
+    if (!i_capture_session)
+      throw std::runtime_error("Failed to get Argus capture session interface");
+
+    ag::Status status;
+    while (should_capture) {
+      uint32_t res = i_capture_session->capture(capture_request.get(),
+                                                ag::TIMEOUT_INFINITE, &status);
+      if (res == 0)
+        throw std::runtime_error(fmt::format(
+            "Couldn't submit Argus capture request: status {}", status));
+
+      frame_producer_ready = true;
     }
   });
 }
@@ -371,6 +285,7 @@ void argus_camera::stop_capture() {
   frame_producer_ready = false;
 
   capture_thread.join();
+  capture_request_thread.join();
 
   cudaError_t res = cudaEGLStreamConsumerDisconnect(&stream_connection);
   if (res != cudaError::cudaSuccess)

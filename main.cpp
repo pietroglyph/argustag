@@ -5,36 +5,60 @@
 
 #include <fmt/core.h>
 
+#include <fstream>
+#include <iostream>
 #include <thread>
 
 #include "argus_camera.h"
 #include "utils/CUDAHelper.h"
 
 int main(int argc, char **argv) {
-  // First, initilize a context through the driver API
-  // CUcontext cudaContext;
-  // if (!ArgusSamples::initCUDA(&cudaContext)) {
-  //     throw std::runtime_error("Couldn't initialize CUDA through the driver
-  //     API");
-  // }
+  int sensorMode = 0;
+  if (argc > 1)
+    sensorMode = std::atoi(argv[1]);
 
-  // From here on in we use the runtime API through the C++ wrappers
   if (cuda::device::count() == 0) {
     throw std::runtime_error("No CUDA devices on this system");
   }
   cuda::force_runtime_initialization();
+  cuda::device::current::get().reset();
 
-  // cuda::device::current::set_to_default();
-  // auto device = cuda::device::current::get();
-  // device.make_current();
-  // fmt::print("Device name: {}\n", device.name());
+  cuco::argus_camera cam(0, sensorMode);
+  cam.start_capture();
 
-  // cuco::argus_camera cam(0, 0);
-  // cam.start_capture();
+  int i = 0;
+  while (true) {
+    // Simulate some other processing so that we don't contend the lock
+    using namespace std::chrono_literals;
+    std::this_thread::sleep_for(10ms);
 
-  // while (true) {
-  //     std::this_thread::yield();
-  // }
+    auto frame = cam.get_latest_frame();
+    if (frame && ++i > 20) {
+      unsigned int dimx = 1280, dimy = 720;
+
+      std::ofstream ofs("first.ppm", std::ios::out | std::ios::binary);
+      ofs << "P6"
+          << "\n"
+          << dimx << ' ' << dimy << "\n"
+          << "255"
+          << "\n";
+
+      auto frame_host = std::make_unique<uint8_t[]>(dimx * dimy * 3);
+      cuda::memory::copy(frame_host.get(), frame.get(), dimx * dimy * 3);
+      auto frame_host_buf = frame_host.get();
+
+      for (auto y = 0u; y < dimy; ++y) {
+        for (auto x = 0u; x < dimx; ++x) {
+          auto i = y * dimy * 3 + x * 3;
+          ofs << static_cast<char>(frame_host_buf[i])
+              << static_cast<char>(frame_host_buf[i + 1])
+              << static_cast<char>(frame_host_buf[i + 2]);
+        }
+      }
+
+      break;
+    }
+  }
 
   return EXIT_SUCCESS;
 }

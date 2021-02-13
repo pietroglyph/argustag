@@ -53,12 +53,15 @@ private:
   EGLStreamKHR egl_stream;
   cudaEGLStreamConnection stream_connection;
 
+  // TODO: Could double- or triple-buffer this if the latest_frame_mutex is
+  // frequently contended
   std::mutex latest_frame_mutex;
   cuda::memory::device::unique_ptr<std::uint8_t[]> latest_frame;
 
   std::atomic_bool frame_producer_ready{false};
   std::atomic_bool should_capture{false};
   std::thread capture_thread;
+  std::thread capture_request_thread;
 };
 
 } // namespace cuco
