@@ -5,12 +5,15 @@
 
 #include <fmt/core.h>
 
+#include <opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
+
 #include <fstream>
 #include <iostream>
 #include <thread>
 
 #include "argus_camera.h"
-#include "utils/CUDAHelper.h"
 
 int main(int argc, char **argv) {
   int sensorMode = 0;
@@ -32,33 +35,27 @@ int main(int argc, char **argv) {
     using namespace std::chrono_literals;
     std::this_thread::sleep_for(10ms);
 
-    auto frame = cam.get_latest_frame();
-    if (frame && ++i > 20) {
-      unsigned int dimx = 1280, dimy = 720;
+    auto [frame, width, height, depth] = cam.get_latest_frame();
+    auto pitch = width * depth;
+    if (frame && ++i > 5) {
+      auto frame_host = std::make_unique<uint8_t[]>(pitch * height);
+      cuda::memory::copy(frame_host.get(), frame.get(), pitch * height);
+      cuda::device::current::get().synchronize();
 
-      std::ofstream ofs("first.ppm", std::ios::out | std::ios::binary);
-      ofs << "P6"
-          << "\n"
-          << dimx << ' ' << dimy << "\n"
-          << "255"
-          << "\n";
+      cv::Mat frame_mat{static_cast<int>(height), static_cast<int>(width),
+                        static_cast<int>(CV_8UC(depth)), frame_host.get(),
+                        pitch};
+      cv::cvtColor(frame_mat, frame_mat,
+                   cv::COLOR_RGBA2BGRA); // OpenCV wants BGRA
+      cv::imwrite("out.png", frame_mat);
 
-      auto frame_host = std::make_unique<uint8_t[]>(dimx * dimy * 3);
-      cuda::memory::copy(frame_host.get(), frame.get(), dimx * dimy * 3);
-      auto frame_host_buf = frame_host.get();
-
-      for (auto y = 0u; y < dimy; ++y) {
-        for (auto x = 0u; x < dimx; ++x) {
-          auto i = y * dimy * 3 + x * 3;
-          ofs << static_cast<char>(frame_host_buf[i])
-              << static_cast<char>(frame_host_buf[i + 1])
-              << static_cast<char>(frame_host_buf[i + 2]);
-        }
-      }
+      fmt::print("Written\n");
 
       break;
     }
   }
+
+  cam.stop_capture();
 
   return EXIT_SUCCESS;
 }

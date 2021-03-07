@@ -42,6 +42,7 @@ endif()
 set(THIRDPARTY_DEP_DIR "${CMAKE_SOURCE_DIR}/thirdparty/lib/cmake")
 
 find_package(Argus REQUIRED)
+find_package(OpenCV REQUIRED)
 find_package(fmt REQUIRED
     PATHS ${THIRDPARTY_DEP_DIR})
 find_package(cuda-api-wrappers
@@ -50,9 +51,11 @@ find_package(cuda-api-wrappers
 add_executable(${PROJECT_NAME}
     main.cpp
     argus_camera.cpp
+    file_camera.cpp
 
     utils/ArgusHelpers.cpp
     # Linking breaks without at least one .cu file... I anticipate having real files so I'll go with this kludge for now
+    utils/color_conversion.cu
     dummy.cu 
     )
 
@@ -61,10 +64,12 @@ add_executable(${PROJECT_NAME}
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
     ${ARGUS_INCLUDE_DIRS}
+    ${OpenCV_INCLUDE_DIRS}
     )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     ${ARGUS_LIBRARIES}
+    ${OpenCV_LIBS}
     fmt::fmt
     cuda
     pthread
@@ -74,11 +79,13 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 set_target_properties(${PROJECT_NAME} PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON)
 
-# TODO: Figure out how to isolate Argus' includes to another target so that we can turn this on
-#target_compile_options(${PROJECT_NAME} PRIVATE
-#    $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX>
-#    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -pedantic -Werror>
-#)
+# Wrap everything in a COMPILE_LANGUAGE:CXX generator expression so that we don't add these flags for the CUDA language
+if (MSVC)
+    target_compile_options(${TARGET_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>/W4 /WX>)
+else()
+    # TODO: Argus includes are in the main project target because FindArgus.cmake is bad, and Argus wasn't designed with -pedantic on
+    target_compile_options(${PROJECT_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Werror>)
+endif()
 
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)
 

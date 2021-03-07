@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <tuple>
 
 #include <cuda/runtime_api.hpp>
 
@@ -29,13 +30,15 @@ public:
 
   void stop_capture();
 
-  cuda::memory::device::unique_ptr<std::uint8_t[]> get_latest_frame();
+  std::tuple<cuda::memory::device::unique_ptr<std::uint8_t[]>, unsigned int,
+             unsigned int, unsigned int>
+  get_latest_frame();
 
 private:
   // This is the device active for the thread that's instantiating and
   // controlling this class. We hold it so that it can be made active for the
   // frame receiving thread.
-  cuda::device_t device;
+  cuda::device_t current_cuda_device;
 
   // Ew. FIXME.
   std::unique_ptr<ag::CameraProvider, std::function<void(ag::CameraProvider *)>>
@@ -57,6 +60,10 @@ private:
   // frequently contended
   std::mutex latest_frame_mutex;
   cuda::memory::device::unique_ptr<std::uint8_t[]> latest_frame;
+
+  unsigned int output_frame_width, output_frame_height;
+  int output_frame_depth; // Note this counts the number of packed channels, not
+                          // planes
 
   std::atomic_bool frame_producer_ready{false};
   std::atomic_bool should_capture{false};
