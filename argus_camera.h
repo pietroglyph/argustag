@@ -2,6 +2,7 @@
 #define argus_camera_H
 
 #include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -34,6 +35,14 @@ public:
              unsigned int, unsigned int>
   get_latest_frame();
 
+  void return_frame(cuda::memory::device::unique_ptr<std::uint8_t[]> frame) {
+    std::scoped_lock lk(frame_pool_mutex);
+
+    static constexpr int max_frame_pool_size = 5;
+    if (frame_pool.size() < max_frame_pool_size && frame)
+      frame_pool.emplace_back(std::move(frame));
+  }
+
 private:
   // This is the device active for the thread that's instantiating and
   // controlling this class. We hold it so that it can be made active for the
@@ -56,14 +65,13 @@ private:
   EGLStreamKHR egl_stream;
   cudaEGLStreamConnection stream_connection;
 
-  // TODO: Could double- or triple-buffer this if the latest_frame_mutex is
-  // frequently contended
-  std::mutex latest_frame_mutex;
-  cuda::memory::device::unique_ptr<std::uint8_t[]> latest_frame;
+  std::mutex frame_pool_mutex;
+  std::vector<cuda::memory::device::unique_ptr<std::uint8_t[]>> frame_pool;
+  std::condition_variable new_frame_available_cv;
+  std::atomic_bool new_frame_available{false};
 
   unsigned int output_frame_width, output_frame_height;
-  int output_frame_depth; // Note this counts the number of packed channels, not
-                          // planes
+  int output_frame_channels; // Right now this is always 4, because we return RGBX; note: channels != planes
 
   std::atomic_bool frame_producer_ready{false};
   std::atomic_bool should_capture{false};

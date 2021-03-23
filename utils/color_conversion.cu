@@ -51,7 +51,7 @@ template <typename T>
 static cudaError_t launchNV12ToRGBX(const __restrict__ uint8_t *src_luma,
                                     const __restrict__ uint8_t *src_chroma,
                                     T *dst, std::size_t width,
-                                    std::size_t height) {
+                                    std::size_t height, cuda::stream_t& stream) {
   if (!src_luma || !src_chroma || !dst)
     return cudaError::cudaErrorInvalidDevicePointer;
   if (width == 0 || height == 0)
@@ -71,7 +71,9 @@ static cudaError_t launchNV12ToRGBX(const __restrict__ uint8_t *src_luma,
   const dim3 grid_dim(div_round_up(width, block_dim.x),
                       div_round_up(height, block_dim.y));
 
-  NV12ToRGBX<T><<<grid_dim, block_dim>>>(src_luma, src_chroma, src_luma_pitch,
+  //auto launch_config = cuda::make_launch_config(block_dim, grid_dim);
+  //stream.enqueue.kernel_launch(cudaNV12ToRGBX<T>, launch_config, src_luma, src_chroma, src_luma_pitch, src_chroma_pitch, dst, dst_pitch, width, height);
+  NV12ToRGBX<T><<<grid_dim, block_dim, 0, stream.id()>>>(src_luma, src_chroma, src_luma_pitch,
                                          src_chroma_pitch, dst, dst_pitch,
                                          width, height);
 
@@ -81,6 +83,6 @@ static cudaError_t launchNV12ToRGBX(const __restrict__ uint8_t *src_luma,
 cudaError_t cudaNV12ToRGBX(const uint8_t *__restrict__ src_luma,
                            const uint8_t *__restrict__ src_chroma,
                            uchar4 *__restrict__ dst, unsigned int width,
-                           unsigned int height) {
-  return launchNV12ToRGBX(src_luma, src_chroma, dst, width, height);
+                           unsigned int height, cuda::stream_t& stream) {
+  return launchNV12ToRGBX(src_luma, src_chroma, dst, width, height, stream);
 }
