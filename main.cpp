@@ -17,8 +17,8 @@
 #include <iostream>
 #include <thread>
 
-#include "file_camera.h"
 #include "argus_camera.h"
+#include "file_camera.h"
 
 int main(int argc, char **argv) {
   int sensor_mode = 0;
@@ -37,11 +37,12 @@ int main(int argc, char **argv) {
       .fx = 2399.1, .fy = 2390.1, .cx = 1618.7, .cy = 1235.5};
 
   cuco::argus_camera cam(0, sensor_mode);
-  //std::filesystem::path img_path = "./calib_1.png";
-  //cuco::file_camera cam(img_path);
+  // std::filesystem::path img_path = "./calib_1.png";
+  // cuco::file_camera cam(img_path);
   cam.start_capture();
 
-  auto apriltag_stream = cuda::device::current::get().create_stream(cuda::stream::async);
+  auto apriltag_stream =
+      cuda::device::current::get().create_stream(cuda::stream::async);
 
   int i = 0;
   std::chrono::time_point<std::chrono::system_clock> last_loop_time;
@@ -63,7 +64,6 @@ int main(int argc, char **argv) {
       continue;
     }
 
-
     uint32_t num_tags_detected;
     std::array<nvAprilTagsID_t, 5> april_tags_detected{};
     nvAprilTagsImageInput_t april_tags_image{
@@ -82,7 +82,7 @@ int main(int argc, char **argv) {
       throw std::runtime_error("Couldn't detect AprilTags");
     else if (num_tags_detected > 0)
       fmt::print("Detected {} tags\n", num_tags_detected);
-    
+
     fmt::print("Frame time of {} ms\n",
                std::chrono::duration_cast<std::chrono::milliseconds>(
                    std::chrono::system_clock::now() - last_loop_time)

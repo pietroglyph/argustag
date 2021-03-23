@@ -14,7 +14,7 @@
 cudaError_t cudaNV12ToRGBX(const uint8_t *__restrict__ src_luma,
                            const uint8_t *__restrict__ src_chroma,
                            uchar4 *__restrict__ dst, unsigned int width,
-                           unsigned int height, cuda::stream_t& stream);
+                           unsigned int height, cuda::stream_t &stream);
 
 // Used to allow dealing with generic vector types
 // TODO: Remove or at least use decltype

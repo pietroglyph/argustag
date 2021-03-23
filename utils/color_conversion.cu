@@ -64,15 +64,13 @@ static cudaError_t launchNV12ToRGBX(const __restrict__ uint8_t *src_luma,
   const auto dst_pitch =
       width; // Note: no sizeof(T) because we're indexing over T and not uint8_t
 
-  // TODO: change the y block dim to achieve maximum occupancy in each SM...
-  // right now each SM might have more than 8 warps
+  // Means that we use at least 8 warps per streaming multiprocesor 
+  // Seems to result in good performance vs. higher or lower numbers
   static constexpr int warp_size = 32;
   const dim3 block_dim(warp_size, 8);
   const dim3 grid_dim(div_round_up(width, block_dim.x),
                       div_round_up(height, block_dim.y));
 
-  //auto launch_config = cuda::make_launch_config(block_dim, grid_dim);
-  //stream.enqueue.kernel_launch(cudaNV12ToRGBX<T>, launch_config, src_luma, src_chroma, src_luma_pitch, src_chroma_pitch, dst, dst_pitch, width, height);
   NV12ToRGBX<T><<<grid_dim, block_dim, 0, stream.id()>>>(src_luma, src_chroma, src_luma_pitch,
                                          src_chroma_pitch, dst, dst_pitch,
                                          width, height);

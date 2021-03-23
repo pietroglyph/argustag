@@ -3,8 +3,8 @@
 
 #include <cuda/runtime_api.hpp>
 
-#include <mutex>
 #include <filesystem>
+#include <mutex>
 
 namespace cuco {
 class file_camera {

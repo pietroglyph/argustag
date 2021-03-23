@@ -71,7 +71,8 @@ private:
   std::atomic_bool new_frame_available{false};
 
   unsigned int output_frame_width, output_frame_height;
-  int output_frame_channels; // Right now this is always 4, because we return RGBX; note: channels != planes
+  int output_frame_channels; // Right now this is always 4, because we return
+                             // RGBX; note: channels != planes
 
   std::atomic_bool frame_producer_ready{false};
   std::atomic_bool should_capture{false};
